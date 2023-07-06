@@ -1,0 +1,34 @@
+# 服务配置
+server:
+  port: 8080
+
+# spring 配置
+spring:
+  servlet:
+    multipart:
+      max-file-size: 200MB     #单个文件最大限制
+      max-request-size: 500MB  #多个文件最大限制
+
+# minio 配置
+minio:
+  endpoint: http://localhost:9000
+  accessKey: minioadmin
+  secretKey: minioadmin
+  bucketName: test
+
+# knife4j文档配置
+knife4j:
+  enable: true
+  openapi:
+    title: Minio
+    description: 这是个springboot的测试demo
+    email: 1271899086@qq.com
+    concat: 小麦
+    version: v4.0
+    license: Apache 2.0
+    group:
+      test1:
+        group-name: minio文件操作
+        api-rule: package
+        api-rule-resources:
+          - com.springboot.rest

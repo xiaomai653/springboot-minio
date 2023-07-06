@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+	<meta charset="UTF-8" />
+	<head>
+		<title>大文件上传</title>
+		<link href="https://cdn.bootcss.com/bootstrap/3.3.2/css/bootstrap.css" rel="stylesheet">
+		<script src="https://code.jquery.com/jquery-2.2.4.js"></script>
+		<script src="./js/spark-md5.min.js"></script>
+		<!--计算md5的js地址：https://github.com/satazor/js-spark-md5/blob/master/spark-md5.min.js-->
+	</head>
+	<body class="container">
+		<div class="modal-body">
+			<form id="insertCourse" action="/course/addCourse" method="post" enctype="multipart/form-data">
+				<div class="form-group">
+					<label class="col-sm-5 control-label">视频描述</label>
+					<div class="col-sm-10">
+						<input class="form-control" placeholder="输入视频描述" name="fileDes" id="testFileDes"></input>
+					</div>
+				</div>
+				<div class="form-group">
+					<label for="inputPassword" class="col-sm-5 control-label">上传视频</label>
+					<div class="col-sm-10">
+						<input type="file" name="file" id="inputPassword" />
+					</div>
+				</div>
+				<div class="progress" id="progress" style="display: none;">
+					<div class="progress-bar" role="progressbar" aria-valuenow="60" aria-valuemin="0"
+						aria-valuemax="100" style="width: 0%;">
+					</div>
+				</div>
+				<div id="connected" style="display: none;">
+					<div>当前进度：<span id="first"></span></div>
+				</div>
+			</form>
+		</div>
+		<div class="modal-footer">
+			<button type="button" id="close" class="btn btn-default" data-dismiss="modal">关闭</button>
+			<button type="button" id="addCourse" class="btn btn-primary">提交</button>
+		</div>
+
+	</body>
+	<script type="text/javascript">
+		$("#addCourse").click(function() {
+			$(this).attr("disabled", "disabled");
+			$(this).html("正在上传，请耐心等候...");
+			$("#progress").show();
+			$("#connected").show();
+			$(".progress-bar").css("width", "0%");
+			var form = new FormData();
+			form.append("fileDes", $("#testFileDes").val());
+			//开始上传
+			uploadBigFile($("#inputPassword"), "http://localhost:8080/minio/uploadBigFile", form, "fileDes");
+		});
+
+		/**
+		 * 大文件上传
+		 * @param {Object} file ype=file的input标签对象
+		 * @param {Object} url 分片上传、断点续传的接口地址
+		 * @param {Object} form var formData = new FormData(); 传一个formData对象，里面存放业务参数并传过来
+		 * @param {Object} params formData中存放的业务参数名称，拼接成逗号分割的字符串传过来
+		 */
+		function uploadBigFile(file, url, form, params) {
+			console.log('upload...');
+			var bytesPerPiece = 1024 * 1024 * 5; // minio除最后一块分片可以小于5m，其余分片必须大于等于5m，
+			var totalPieces; // 总的切片数量
+			var blob = file[0].files[0]; //得到文件的blob
+			var start = 0;
+			var end;
+			var index = 0;
+			var filesize = blob.size;
+			var filename = blob.name;
+
+			totalPieces = Math.ceil(filesize / bytesPerPiece); //计算文件切片总数
+
+			let md5String = '';
+			// 大于100M则切片加密
+			if (filesize > 1024 * 1024 * 100) {
+				//  md5加密文件，切片加密
+				const fileReader1 = new FileReader()
+				const md51 = new SparkMD5();
+				let md5index = 0;
+				const loadFile = () => {
+					const slice = blob.slice(md5index, md5index + bytesPerPiece);
+					fileReader1.readAsBinaryString(slice);
+				}
+				loadFile();
+				fileReader1.onload = e => {
+					md51.appendBinary(e.target.result);
+					if (md5index < filesize) {
+						md5index += bytesPerPiece;
+						loadFile();
+					} else {
+						md5String = md51.end();
+						loopId = window.setTimeout(loop, 0);
+						console.log('切片加密', md5String);
+					}
+				};
+			} else {
+				// md5加密文件，直接加密
+				console.log(new Date());
+				const fileReader = new FileReader()
+				fileReader.readAsBinaryString(blob);
+				fileReader.onload = e => {
+					md5String = SparkMD5.hashBinary(e.target.result);
+					loopId = window.setTimeout(loop, 0);
+					console.log('直接加密', md5String);
+				}
+			}
+
+			var loop = function() {
+				if (start >= filesize) {
+					// window.location.href=window.location.href;
+					return;
+				} //退出循环
+				end = start + bytesPerPiece;
+				if (end > filesize) {
+					end = filesize;
+				}
+				var chunk = blob.slice(start, end); //切割文件
+				var sliceIndex = index; //分片索引（第几个分片）
+
+				//存业务属性
+				var formData = new FormData();
+				var strs = new Array();
+				if (params) {
+					strs = params.split(",");
+					for (i = 0; i < strs.length; i++) {
+						var paramValue = form.get(strs[i]);
+						formData.append(strs[i], paramValue);
+					}
+				}
+
+				formData.append("file", chunk); //文件分片
+				formData.append("fileName", filename); //文件名
+				formData.append("sliceIndex", sliceIndex); //分片索引
+				formData.append("totalPieces", totalPieces); //切片总数
+				formData.append('md5', md5String);//MD5
+				$.ajax({
+					url: url,
+					type: "POST",
+					cache: true,
+					data: formData,
+					async: false,
+					processData: false,
+					contentType: false,
+					success: function(data) { //响应结果，此处为渲染进度条
+						//############################################
+						// console.log("获取查询结果")
+						// console.log(index / totalPieces);
+						// console.log(index / totalPieces *100 +"%");
+						if (data === 'fail' || data === '-2') {
+							console.log("返回" + data)
+							$("#addCourse").html("上传失败")
+						} else if (Number.parseInt(data) != -1) {
+							$("#first").html((index / totalPieces * 100).toFixed(2) + "%");
+							$(".progress-bar").css("width", (index / totalPieces * 100).toFixed(2) + "%");
+							//############################################
+							console.log(index + "分片上传成功")
+							console.log("下个分片：" + data + "," + sliceIndex)
+							index = Number.parseInt(data)
+							start = index * bytesPerPiece;
+
+							loopId = window.setTimeout(loop, 0);
+						} else {
+							$("#first").html("100%");
+							$(".progress-bar").css("width", "100%");
+						}
+					},
+					error: function(res) {
+						console.log("失败:" + res)
+						$("#addCourse").html("上传失败")
+					}
+				});
+			}
+		}
+	</script>
+</html>
